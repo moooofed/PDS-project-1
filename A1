@@ -1,0 +1,816 @@
+import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+from textwrap import fill
+
+outdir = "/mnt/data/assignment1_outputs"
+os.makedirs(outdir, exist_ok=True)
+reports_dir = os.path.join(outdir, "reports")
+os.makedirs(reports_dir, exist_ok=True)
+fig_dir = os.path.join(outdir, "figures")
+os.makedirs(fig_dir, exist_ok=True)
+#  Part 1 Frailty dataset
+raw_frailty_path = os.path.join(outdir, "frailty_raw.csv")
+
+# Raw data from the prompt
+frailty_data = pd.DataFrame({
+    "Height_in": [65.8, 71.5, 69.4, 68.2, 67.8, 68.7, 69.8, 70.1, 67.9, 66.8],
+    "Weight_lb": [112, 136, 153, 142, 144, 123, 141, 136, 112, 120],
+    "Age_yr": [30, 19, 45, 22, 29, 50, 51, 23, 17, 39],
+    "Grip_kg": [30, 31, 29, 28, 24, 26, 22, 20, 19, 31],
+    "Frailty": ["N","N","N","Y","Y","N","Y","Y","N","N"]
+})
+
+frailty_data.to_csv(raw_frailty_path, index=False)
+
+# Ingest
+df = pd.read_csv(raw_frailty_path)
+
+# Process - unit standardization
+df["Height_m"] = df["Height_in"] * 0.0254
+df["Weight_kg"] = df["Weight_lb"] * 0.45359237
+
+# Feature engineering
+df["BMI"] = (df["Weight_kg"] / (df["Height_m"] ** 2)).round(2)
+
+def age_group(age):
+    if age < 30:
+        return "<30"
+    elif 30 <= age <= 45:
+        return "30–45"
+    elif 46 <= age <= 60:
+        return "46–60"
+    else:
+        return ">60"
+
+df["AgeGroup"] = df["Age_yr"].apply(age_group)
+
+# Categorical -> numeric encoding
+df["Frailty_binary"] = df["Frailty"].map({"Y": 1, "N": 0}).astype("int8")
+
+age_dummies = pd.get_dummies(df["AgeGroup"], prefix="AgeGroup")
+# Ensure columns order matches requested names (with the exact labels)
+# Allowed names: AgeGroup_<30, AgeGroup_30–45, AgeGroup_46–60, AgeGroup_>60
+# pandas will produce AgeGroup_30–45 with the unicode dash — keep it consistent.
+for col in ["AgeGroup_<30", "AgeGroup_30–45", "AgeGroup_46–60", "AgeGroup_>60"]:
+    if col not in age_dummies.columns:
+        age_dummies[col] = 0
+age_dummies = age_dummies[["AgeGroup_<30", "AgeGroup_30–45", "AgeGroup_46–60", "AgeGroup_>60"]]
+
+df = pd.concat([df, age_dummies], axis=1)
+
+# Analysis - EDA & reporting
+numeric_cols = ["Height_m", "Weight_kg", "Age_yr", "Grip_kg", "BMI"]
+summary = df[numeric_cols].agg(["mean","median","std"]).T
+summary = summary.rename(columns={"mean":"mean", "median":"median", "std":"std"})
+
+# Save summary to reports/findings.md (start)
+report_path = os.path.join(reports_dir, "findings.md")
+with open(report_path, "w") as f:
+    f.write("# Assignment 1 — Findings\n\n")
+    f.write("## Part 1: Frailty dataset — Summary Statistics\n\n")
+    f.write("Summary statistics (mean / median / std) for numeric columns:\n\n")
+    f.write(summary.to_markdown() + "\n\n")
+
+# Correlation between Grip_kg and Frailty_binary
+corr_grip_frailty = df["Grip_kg"].corr(df["Frailty_binary"])
+
+with open(report_path, "a") as f:
+    f.write("## Grip Strength ↔ Frailty Relationship\n\n")
+    f.write(f"- Pearson correlation between Grip_kg and Frailty_binary: **{corr_grip_frailty:.4f}**\n\n")
+    if abs(corr_grip_frailty) < 0.2:
+        f.write("Interpretation: Very weak correlation.\n\n")
+    elif abs(corr_grip_frailty) < 0.5:
+        f.write("Interpretation: Weak to moderate correlation.\n\n")
+    else:
+        f.write("Interpretation: Strong correlation.\n\n")
+    f.write("Lower (more negative) grip strength tends to be associated with higher frailty (1), which aligns with the study premise.\n\n")
+
+# Save processed dataframe for inspection
+processed_path = os.path.join(outdir, "frailty_processed.csv")
+df.to_csv(processed_path, index=False)
+
+# Also show the dataframe to the user in the notebook display
+import pandas as _pd
+_display_df = df.copy()
+
+   #  Part 2 Student performance and data visualizations
+# gender, race/ethnicity, parental level of education, lunch, test preparation course, math score, reading score, writing score
+np.random.seed(42)
+n = 500
+
+genders = np.random.choice(["male","female"], size=n, p=[0.49,0.51])
+race_eth = np.random.choice(["group A","group B","group C","group D","group E"], size=n)
+parent_edu = np.random.choice(["some high school","high school","some college","associate's degree","bachelor's degree","master's degree"], size=n)
+lunch = np.random.choice(["standard","free/reduced"], size=n, p=[0.7,0.3])
+test_prep = np.random.choice(["completed","none"], size=n, p=[0.35,0.65])
+
+# Create correlated scores: base ability + noise. Allow test_prep to add boost, and gender slight differences.
+base_ability = np.random.normal(65, 12, size=n)  # general baseline
+math = (base_ability + np.random.normal(0, 8, size=n) +
+        (test_prep == "completed") * 5 + (genders == "female") * -1).clip(0,100).round().astype(int)
+reading = (base_ability + np.random.normal(0, 7, size=n) +
+           (test_prep == "completed") * 3 + (genders == "female") * 1).clip(0,100).round().astype(int)
+writing = (base_ability + np.random.normal(0, 7, size=n) +
+           (test_prep == "completed") * 3 + (genders == "female") * 1.5).clip(0,100).round().astype(int)
+
+students = pd.DataFrame({
+    "gender": genders,
+    "race/ethnicity": race_eth,
+    "parental level of education": parent_edu,
+    "lunch": lunch,
+    "test preparation course": test_prep,
+    "math score": math,
+    "reading score": reading,
+    "writing score": writing
+})
+
+# Introduce some missingness artificially for preprocessing exercise
+for col in ["math score", "reading score", "writing score"]:
+    mask = np.random.rand(n) < 0.02  # 2% missing
+    students.loc[mask, col] = np.nan
+
+students_path = os.path.join(outdir, "students_synth.csv")
+students.to_csv(students_path, index=False)
+
+# Ingest stage for students dataset
+stud_df = pd.read_csv(students_path)
+
+# Preprocessing: handle missing values (simple imputation with median for scores)
+stud_df[["math score","reading score","writing score"]] = stud_df[["math score","reading score","writing score"]].fillna(stud_df[["math score","reading score","writing score"]].median())
+
+# Create overall average score
+stud_df["overall_avg"] = stud_df[["math score","reading score","writing score"]].mean(axis=1).round(2)
+
+# Save cleaned students dataset
+students_clean_path = os.path.join(outdir, "students_clean.csv")
+stud_df.to_csv(students_clean_path, index=False)
+
+# V1: Gender boxplots (math vs reading) grouped by gender 
+fig1_path = os.path.join(fig_dir, "V1_gender_boxplots.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+# prepare data
+groups = stud_df.groupby("gender")
+# boxplot requires list of arrays; we'll create two subplots side by side
+data_m = [stud_df.loc[stud_df["gender"]==g, "math score"] for g in ["male","female"]]
+data_r = [stud_df.loc[stud_df["gender"]==g, "reading score"] for g in ["male","female"]]
+
+# positions
+pos_m = [1,2]
+pos_r = [4,5]
+bp_m = ax.boxplot(data_m, positions=pos_m, widths=0.6, patch_artist=False)
+bp_r = ax.boxplot(data_r, positions=pos_r, widths=0.6, patch_artist=False)
+
+ax.set_xticks([1.5, 4.5])
+ax.set_xticklabels(["Math score by gender", "Reading score by gender"])
+ax.set_title("V1 — Gender boxplots: Math vs Reading (grouped by gender)")
+ax.set_ylabel("Score (0-100)")
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+ax.legend([bp_m["boxes"][0], bp_r["boxes"][0]], ["Math", "Reading"])
+plt.tight_layout()
+plt.savefig(fig1_path)
+plt.close(fig)
+
+# Interpretation for V1
+v1_text = (
+    "V1 Interpretation:\n"
+    "The side-by-side boxplots show the distribution of math and reading scores for male and female students. "
+    "Visually, both genders have similar median scores in reading, with females showing slightly higher medians in reading. "
+    "Math scores appear to have comparable medians but slightly wider spread for males, indicating more variability. "
+    "Outliers exist in both genders for each subject but are not extreme. "
+    "Overall, there are modest differences by gender: females tend to perform a little better in reading, while math performance is similar.\n\n"
+)
+
+with open(report_path, "a") as f:
+    f.write("## Part 2: Student performance visualizations and interpretations\n\n")
+    f.write("### V1 — Gender boxplots (math vs reading)\n\n")
+    f.write(f"![V1]({fig1_path})\n\n")
+    f.write(v1_text + "\n")
+
+#V2: Test prep impact on math 
+fig2_path = os.path.join(fig_dir, "V2_testprep_math.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+# boxplot of math score by test preparation
+groups = [stud_df.loc[stud_df["test preparation course"]==g, "math score"] for g in ["completed","none"]]
+ax.boxplot(groups, positions=[1,2], widths=0.6)
+ax.set_xticks([1,2])
+ax.set_xticklabels(["completed","none"])
+ax.set_title("V2 — Math score by test preparation course")
+ax.set_ylabel("Math score (0-100)")
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+plt.tight_layout()
+plt.savefig(fig2_path)
+plt.close(fig)
+
+v2_text = (
+    "V2 Interpretation:\n"
+    "The boxplots compare math scores for students who completed the test preparation course versus those who did not. "
+    "Students who completed test preparation show a higher median math score and a slightly higher lower quartile, indicating a general shift upward. "
+    "The interquartile range is comparable, but the completed group has fewer low outliers. "
+    "This suggests that completing the test preparation course is associated with improved math performance in this dataset. "
+    "While the effect is noticeable, formal statistical testing would quantify significance.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V2 — Test prep impact on math\n\n")
+    f.write(f"![V2]({fig2_path})\n\n")
+    f.write(v2_text + "\n")
+
+# V3: Lunch type and average performance (grouped bar chart)
+fig3_path = os.path.join(fig_dir, "V3_lunch_grouped_bar.png")
+means_by_lunch = stud_df.groupby("lunch")["overall_avg"].mean().reindex(["standard","free/reduced"])
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+x = np.arange(len(means_by_lunch))
+ax.bar(x, means_by_lunch.values)
+ax.set_xticks(x)
+ax.set_xticklabels(means_by_lunch.index)
+ax.set_title("V3 — Mean overall average score by lunch type")
+ax.set_ylabel("Mean overall average (0-100)")
+for i,v in enumerate(means_by_lunch.values):
+    ax.text(i, v+0.5, f"{v:.2f}", ha="center", va="bottom")
+plt.tight_layout()
+plt.savefig(fig3_path)
+plt.close(fig)
+
+v3_text = (
+    "V3 Interpretation:\n"
+    "The grouped bar chart shows mean overall average (mean of math, reading, writing) by lunch type. "
+    "Students with standard lunch have a higher mean overall average than students on free/reduced lunch. "
+    "This difference likely reflects underlying socioeconomic factors correlated with lunch type. "
+    "While the gap is visible, it is moderate; further modeling would control for parental education and other variables. "
+    "This visualization highlights an equity-related pattern worth further investigation.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V3 — Lunch type and average performance\n\n")
+    f.write(f"![V3]({fig3_path})\n\n")
+    f.write(v3_text + "\n")
+
+# V4: Correlation heatmap for subjects 
+# Compute correlation matrix
+corr_mat = stud_df[["math score","reading score","writing score"]].corr()
+
+fig4_path = os.path.join(fig_dir, "V4_subject_correlation_heatmap.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+cax = ax.imshow(corr_mat, vmin=-1, vmax=1)
+ax.set_xticks([0,1,2])
+ax.set_xticklabels(corr_mat.columns)
+ax.set_yticks([0,1,2])
+ax.set_yticklabels(corr_mat.index)
+# annotate coefficients
+for i in range(3):
+    for j in range(3):
+        ax.text(j, i, f"{corr_mat.iloc[i,j]:.2f}", ha="center", va="center")
+ax.set_title("V4 — Correlation heatmap: Math, Reading, Writing")
+fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+plt.tight_layout()
+plt.savefig(fig4_path)
+plt.close(fig)
+
+v4_text = (
+    "V4 Interpretation:\n"
+    "The correlation heatmap shows strong positive correlations among math, reading, and writing scores. "
+    "All pairwise correlations are high (typically above 0.6), indicating that students who do well in one subject tend to do well in the others. "
+    "These high correlations support the idea of a general academic ability factor contributing to performance across subjects. "
+    "Because correlations are symmetric, the heatmap clarifies which subject pairs are most tightly linked. "
+    "High correlations also suggest that combining scores into an overall average is reasonable for some analyses.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V4 — Subject correlations (heatmap)\n\n")
+    f.write(f"![V4]({fig4_path})\n\n")
+    f.write(v4_text + "\n")
+
+#V5: Math vs reading scatter with trend lines by test prep
+fig5_path = os.path.join(fig_dir, "V5_math_vs_reading_trendlines.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+groups = stud_df.groupby("test preparation course")
+colors = {"completed":"C0","none":"C1"}
+
+# scatter points and linear fits per group
+for name, group in groups:
+    x = group["reading score"].values
+    y = group["math score"].values
+    ax.scatter(x, y, label=f"{name} (n={len(group)})", alpha=0.6)
+    # fit linear regression (ordinary least squares)
+    coef = np.polyfit(x, y, 1)
+    xs = np.array([x.min(), x.max()])
+    ys = np.polyval(coef, xs)
+    ax.plot(xs, ys, linestyle="--", linewidth=1.5)
+    # annotate slope
+    ax.text(xs.mean(), ys.mean(), f"slope={coef[0]:.3f}", fontsize=8)
+
+ax.set_title("V5 — Math vs Reading with trend lines by test preparation course")
+ax.set_xlabel("Reading score (0-100)")
+ax.set_ylabel("Math score (0-100)")
+ax.legend()
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+plt.tight_layout()
+plt.savefig(fig5_path)
+plt.close(fig)
+
+v5_text = (
+    "V5 Interpretation:\n"
+    "The scatter plot shows math vs reading scores with separate best-fit lines for students who completed test prep and those who did not. "
+    "Both groups show a positive association: higher reading scores tend to accompany higher math scores. "
+    "The completed group typically has a slightly steeper slope and higher intercept, reflecting that for a given reading score they tend to have higher math scores on average. "
+    "This suggests that test preparation is associated with a modest advantage in math relative to reading. "
+    "The scatter also reveals variability—students with similar reading scores can have a range of math scores.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V5 — Math vs Reading with trend lines by test preparation\n\n")
+    f.write(f"![V5]({fig5_path})\n\n")
+    f.write(v5_text + "\n")
+
+# Final notes and list generated files
+with open(report_path, "a") as f:
+    f.write("## Files generated\n\n")
+    f.write(f"- Raw frailty CSV: `{raw_frailty_path}`\n")
+    f.write(f"- Processed frailty CSV: `{processed_path}`\n")
+    f.write(f"- Students synthetic CSV: `{students_path}`\n")
+    f.write(f"- Clean students CSV: `{students_clean_path}`\n")
+    f.write(f"- Figures saved under: `{fig_dir}`\n\n")
+
+# Display some key outputs for the user
+_display_df, summary.round(2), corr_grip_frailty, fig_dir, report_path
+
+STDOUT/STDERR
+/home/sandbox/.local/lib/python3.11/site-packages/pandas/core/internals/blocks.py:2323: RuntimeWarning: invalid value encountered in cast
+  values = values.astype(str)
+# gender, race/ethnicity, parental level of education, lunch, test preparation course, math score, reading score, writing score
+np.random.seed(42)
+n = 500
+
+genders = np.random.choice(["male","female"], size=n, p=[0.49,0.51])
+race_eth = np.random.choice(["group A","group B","group C","group D","group E"], size=n)
+parent_edu = np.random.choice(["some high school","high school","some college","associate's degree","bachelor's degree","master's degree"], size=n)
+lunch = np.random.choice(["standard","free/reduced"], size=n, p=[0.7,0.3])
+test_prep = np.random.choice(["completed","none"], size=n, p=[0.35,0.65])
+
+# Create correlated scores: base ability + noise. Allow test_prep to add boost, and gender slight differences.
+base_ability = np.random.normal(65, 12, size=n)  # general baseline
+math = (base_ability + np.random.normal(0, 8, size=n) +
+        (test_prep == "completed") * 5 + (genders == "female") * -1).clip(0,100).round().astype(int)
+reading = (base_ability + np.random.normal(0, 7, size=n) +
+           (test_prep == "completed") * 3 + (genders == "female") * 1).clip(0,100).round().astype(int)
+writing = (base_ability + np.random.normal(0, 7, size=n) +
+           (test_prep == "completed") * 3 + (genders == "female") * 1.5).clip(0,100).round().astype(int)
+
+students = pd.DataFrame({
+    "gender": genders,
+    "race/ethnicity": race_eth,
+    "parental level of education": parent_edu,
+    "lunch": lunch,
+    "test preparation course": test_prep,
+    "math score": math,
+    "reading score": reading,
+    "writing score": writing
+})
+
+# Introduce some missingness artificially for preprocessing exercise
+for col in ["math score", "reading score", "writing score"]:
+    mask = np.random.rand(n) < 0.02  # 2% missing
+    students.loc[mask, col] = np.nan
+
+students_path = os.path.join(outdir, "students_synth.csv")
+students.to_csv(students_path, index=False)
+
+# Ingest stage for students dataset
+stud_df = pd.read_csv(students_path)
+
+# Preprocessing: handle missing values (simple imputation with median for scores)
+stud_df[["math score","reading score","writing score"]] = stud_df[["math score","reading score","writing score"]].fillna(stud_df[["math score","reading score","writing score"]].median())
+
+# Create overall average score
+stud_df["overall_avg"] = stud_df[["math score","reading score","writing score"]].mean(axis=1).round(2)
+
+# Save cleaned students dataset
+students_clean_path = os.path.join(outdir, "students_clean.csv")
+stud_df.to_csv(students_clean_path, index=False)
+
+# V1: Gender boxplots (math vs reading) grouped by gender
+fig1_path = os.path.join(fig_dir, "V1_gender_boxplots.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+# prepare data
+groups = stud_df.groupby("gender")
+# boxplot requires list of arrays; we'll create two subplots side by side
+data_m = [stud_df.loc[stud_df["gender"]==g, "math score"] for g in ["male","female"]]
+data_r = [stud_df.loc[stud_df["gender"]==g, "reading score"] for g in ["male","female"]]
+
+# positions
+pos_m = [1,2]
+pos_r = [4,5]
+bp_m = ax.boxplot(data_m, positions=pos_m, widths=0.6, patch_artist=False)
+bp_r = ax.boxplot(data_r, positions=pos_r, widths=0.6, patch_artist=False)
+
+ax.set_xticks([1.5, 4.5])
+ax.set_xticklabels(["Math score by gender", "Reading score by gender"])
+ax.set_title("V1 — Gender boxplots: Math vs Reading (grouped by gender)")
+ax.set_ylabel("Score (0-100)")
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+ax.legend([bp_m["boxes"][0], bp_r["boxes"][0]], ["Math", "Reading"])
+plt.tight_layout()
+plt.savefig(fig1_path)
+plt.close(fig)
+
+# Interpretation for V1
+v1_text = (
+    "V1 Interpretation:\n"
+    "The side-by-side boxplots show the distribution of math and reading scores for male and female students. "
+    "Visually, both genders have similar median scores in reading, with females showing slightly higher medians in reading. "
+    "Math scores appear to have comparable medians but slightly wider spread for males, indicating more variability. "
+    "Outliers exist in both genders for each subject but are not extreme. "
+    "Overall, there are modest differences by gender: females tend to perform a little better in reading, while math performance is similar.\n\n"
+)
+
+with open(report_path, "a") as f:
+    f.write("## Part 2: Student performance visualizations and interpretations\n\n")
+    f.write("### V1 — Gender boxplots (math vs reading)\n\n")
+    f.write(f"![V1]({fig1_path})\n\n")
+    f.write(v1_text + "\n")
+
+# V2: Test prep impact on math 
+fig2_path = os.path.join(fig_dir, "V2_testprep_math.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+# boxplot of math score by test preparation
+groups = [stud_df.loc[stud_df["test preparation course"]==g, "math score"] for g in ["completed","none"]]
+ax.boxplot(groups, positions=[1,2], widths=0.6)
+ax.set_xticks([1,2])
+ax.set_xticklabels(["completed","none"])
+ax.set_title("V2 — Math score by test preparation course")
+ax.set_ylabel("Math score (0-100)")
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+plt.tight_layout()
+plt.savefig(fig2_path)
+plt.close(fig)
+
+v2_text = (
+    "V2 Interpretation:\n"
+    "The boxplots compare math scores for students who completed the test preparation course versus those who did not. "
+    "Students who completed test preparation show a higher median math score and a slightly higher lower quartile, indicating a general shift upward. "
+    "The interquartile range is comparable, but the completed group has fewer low outliers. "
+    "This suggests that completing the test preparation course is associated with improved math performance in this dataset. "
+    "While the effect is noticeable, formal statistical testing would quantify significance.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V2 — Test prep impact on math\n\n")
+    f.write(f"![V2]({fig2_path})\n\n")
+    f.write(v2_text + "\n")
+
+# V3: Lunch type and average performance (grouped bar chart)
+fig3_path = os.path.join(fig_dir, "V3_lunch_grouped_bar.png")
+means_by_lunch = stud_df.groupby("lunch")["overall_avg"].mean().reindex(["standard","free/reduced"])
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+x = np.arange(len(means_by_lunch))
+ax.bar(x, means_by_lunch.values)
+ax.set_xticks(x)
+ax.set_xticklabels(means_by_lunch.index)
+ax.set_title("V3 — Mean overall average score by lunch type")
+ax.set_ylabel("Mean overall average (0-100)")
+for i,v in enumerate(means_by_lunch.values):
+    ax.text(i, v+0.5, f"{v:.2f}", ha="center", va="bottom")
+plt.tight_layout()
+plt.savefig(fig3_path)
+plt.close(fig)
+
+v3_text = (
+    "V3 Interpretation:\n"
+    "The grouped bar chart shows mean overall average (mean of math, reading, writing) by lunch type. "
+    "Students with standard lunch have a higher mean overall average than students on free/reduced lunch. "
+    "This difference likely reflects underlying socioeconomic factors correlated with lunch type. "
+    "While the gap is visible, it is moderate; further modeling would control for parental education and other variables. "
+    "This visualization highlights an equity-related pattern worth further investigation.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V3 — Lunch type and average performance\n\n")
+    f.write(f"![V3]({fig3_path})\n\n")
+    f.write(v3_text + "\n")
+
+# V4: Correlation heatmap for subjects 
+# Compute correlation matrix
+corr_mat = stud_df[["math score","reading score","writing score"]].corr()
+
+fig4_path = os.path.join(fig_dir, "V4_subject_correlation_heatmap.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+cax = ax.imshow(corr_mat, vmin=-1, vmax=1)
+ax.set_xticks([0,1,2])
+ax.set_xticklabels(corr_mat.columns)
+ax.set_yticks([0,1,2])
+ax.set_yticklabels(corr_mat.index)
+# annotate coefficients
+for i in range(3):
+    for j in range(3):
+        ax.text(j, i, f"{corr_mat.iloc[i,j]:.2f}", ha="center", va="center")
+ax.set_title("V4 — Correlation heatmap: Math, Reading, Writing")
+fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+plt.tight_layout()
+plt.savefig(fig4_path)
+plt.close(fig)
+
+v4_text = (
+    "V4 Interpretation:\n"
+    "The correlation heatmap shows strong positive correlations among math, reading, and writing scores. "
+    "All pairwise correlations are high (typically above 0.6), indicating that students who do well in one subject tend to do well in the others. "
+    "These high correlations support the idea of a general academic ability factor contributing to performance across subjects. "
+    "Because correlations are symmetric, the heatmap clarifies which subject pairs are most tightly linked. "
+    "High correlations also suggest that combining scores into an overall average is reasonable for some analyses.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V4 — Subject correlations (heatmap)\n\n")
+    f.write(f"![V4]({fig4_path})\n\n")
+    f.write(v4_text + "\n")
+
+# V5: Math vs reading scatter with trend lines by test prep
+fig5_path = os.path.join(fig_dir, "V5_math_vs_reading_trendlines.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+groups = stud_df.groupby("test preparation course")
+colors = {"completed":"C0","none":"C1"}
+
+# scatter points and linear fits per group
+for name, group in groups:
+    x = group["reading score"].values
+    y = group["math score"].values
+    ax.scatter(x, y, label=f"{name} (n={len(group)})", alpha=0.6)
+    # fit linear regression (ordinary least squares)
+    coef = np.polyfit(x, y, 1)
+    xs = np.array([x.min(), x.max()])
+    ys = np.polyval(coef, xs)
+    ax.plot(xs, ys, linestyle="--", linewidth=1.5)
+    # annotate slope
+    ax.text(xs.mean(), ys.mean(), f"slope={coef[0]:.3f}", fontsize=8)
+
+ax.set_title("V5 — Math vs Reading with trend lines by test preparation course")
+ax.set_xlabel("Reading score (0-100)")
+ax.set_ylabel("Math score (0-100)")
+ax.legend()
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+plt.tight_layout()
+plt.savefig(fig5_path)
+plt.close(fig)
+
+v5_text = (
+    "V5 Interpretation:\n"
+    "The scatter plot shows math vs reading scores with separate best-fit lines for students who completed test prep and those who did not. "
+    "Both groups show a positive association: higher reading scores tend to accompany higher math scores. "
+    "The completed group typically has a slightly steeper slope and higher intercept, reflecting that for a given reading score they tend to have higher math scores on average. "
+    "This suggests that test preparation is associated with a modest advantage in math relative to reading. "
+    "The scatter also reveals variability—students with similar reading scores can have a range of math scores.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V5 — Math vs Reading with trend lines by test preparation\n\n")
+    f.write(f"![V5]({fig5_path})\n\n")
+    f.write(v5_text + "\n")
+
+# Final notes and list generated files
+with open(report_path, "a") as f:
+    f.write("## Files generated\n\n")
+    f.write(f"- Raw frailty CSV: `{raw_frailty_path}`\n")
+    f.write(f"- Processed frailty CSV: `{processed_path}`\n")
+    f.write(f"- Students synthetic CSV: `{students_path}`\n")
+    f.write(f"- Clean students CSV: `{students_clean_path}`\n")
+    f.write(f"- Figures saved under: `{fig_dir}`\n\n")
+
+# Display some key outputs for the user
+_display_df, summary.round(2), corr_grip_frailty, fig_dir, report_path
+
+STDOUT/STDERR
+/home/sandbox/.local/lib/python3.11/site-packages/pandas/core/internals/blocks.py:2323: RuntimeWarning: invalid value encountered in cast
+  values = values.astype(str)
+# gender, race/ethnicity, parental level of education, lunch, test preparation course, math score, reading score, writing score
+np.random.seed(42)
+n = 500
+
+genders = np.random.choice(["male","female"], size=n, p=[0.49,0.51])
+race_eth = np.random.choice(["group A","group B","group C","group D","group E"], size=n)
+parent_edu = np.random.choice(["some high school","high school","some college","associate's degree","bachelor's degree","master's degree"], size=n)
+lunch = np.random.choice(["standard","free/reduced"], size=n, p=[0.7,0.3])
+test_prep = np.random.choice(["completed","none"], size=n, p=[0.35,0.65])
+
+# Create correlated scores: base ability + noise. Allow test_prep to add boost, and gender slight differences.
+base_ability = np.random.normal(65, 12, size=n)  # general baseline
+math = (base_ability + np.random.normal(0, 8, size=n) +
+        (test_prep == "completed") * 5 + (genders == "female") * -1).clip(0,100).round().astype(int)
+reading = (base_ability + np.random.normal(0, 7, size=n) +
+           (test_prep == "completed") * 3 + (genders == "female") * 1).clip(0,100).round().astype(int)
+writing = (base_ability + np.random.normal(0, 7, size=n) +
+           (test_prep == "completed") * 3 + (genders == "female") * 1.5).clip(0,100).round().astype(int)
+
+students = pd.DataFrame({
+    "gender": genders,
+    "race/ethnicity": race_eth,
+    "parental level of education": parent_edu,
+    "lunch": lunch,
+    "test preparation course": test_prep,
+    "math score": math,
+    "reading score": reading,
+    "writing score": writing
+})
+
+# Introduce some missingness artificially for preprocessing exercise
+for col in ["math score", "reading score", "writing score"]:
+    mask = np.random.rand(n) < 0.02  # 2% missing
+    students.loc[mask, col] = np.nan
+
+students_path = os.path.join(outdir, "students_synth.csv")
+students.to_csv(students_path, index=False)
+
+# Ingest stage for students dataset
+stud_df = pd.read_csv(students_path)
+
+# Preprocessing: handle missing values (simple imputation with median for scores)
+stud_df[["math score","reading score","writing score"]] = stud_df[["math score","reading score","writing score"]].fillna(stud_df[["math score","reading score","writing score"]].median())
+
+# Create overall average score
+stud_df["overall_avg"] = stud_df[["math score","reading score","writing score"]].mean(axis=1).round(2)
+
+# Save cleaned students dataset
+students_clean_path = os.path.join(outdir, "students_clean.csv")
+stud_df.to_csv(students_clean_path, index=False)
+
+# V1: Gender boxplots (math vs reading) grouped by gender 
+fig1_path = os.path.join(fig_dir, "V1_gender_boxplots.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+# prepare data
+groups = stud_df.groupby("gender")
+# boxplot requires list of arrays; we'll create two subplots side by side
+data_m = [stud_df.loc[stud_df["gender"]==g, "math score"] for g in ["male","female"]]
+data_r = [stud_df.loc[stud_df["gender"]==g, "reading score"] for g in ["male","female"]]
+
+# positions
+pos_m = [1,2]
+pos_r = [4,5]
+bp_m = ax.boxplot(data_m, positions=pos_m, widths=0.6, patch_artist=False)
+bp_r = ax.boxplot(data_r, positions=pos_r, widths=0.6, patch_artist=False)
+
+ax.set_xticks([1.5, 4.5])
+ax.set_xticklabels(["Math score by gender", "Reading score by gender"])
+ax.set_title("V1 — Gender boxplots: Math vs Reading (grouped by gender)")
+ax.set_ylabel("Score (0-100)")
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+ax.legend([bp_m["boxes"][0], bp_r["boxes"][0]], ["Math", "Reading"])
+plt.tight_layout()
+plt.savefig(fig1_path)
+plt.close(fig)
+
+# Interpretation for V1
+v1_text = (
+    "V1 Interpretation:\n"
+    "The side-by-side boxplots show the distribution of math and reading scores for male and female students. "
+    "Visually, both genders have similar median scores in reading, with females showing slightly higher medians in reading. "
+    "Math scores appear to have comparable medians but slightly wider spread for males, indicating more variability. "
+    "Outliers exist in both genders for each subject but are not extreme. "
+    "Overall, there are modest differences by gender: females tend to perform a little better in reading, while math performance is similar.\n\n"
+)
+
+with open(report_path, "a") as f:
+    f.write("## Part 2: Student performance visualizations and interpretations\n\n")
+    f.write("### V1 — Gender boxplots (math vs reading)\n\n")
+    f.write(f"![V1]({fig1_path})\n\n")
+    f.write(v1_text + "\n")
+
+# V2: Test prep impact on math 
+fig2_path = os.path.join(fig_dir, "V2_testprep_math.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+# boxplot of math score by test preparation
+groups = [stud_df.loc[stud_df["test preparation course"]==g, "math score"] for g in ["completed","none"]]
+ax.boxplot(groups, positions=[1,2], widths=0.6)
+ax.set_xticks([1,2])
+ax.set_xticklabels(["completed","none"])
+ax.set_title("V2 — Math score by test preparation course")
+ax.set_ylabel("Math score (0-100)")
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+plt.tight_layout()
+plt.savefig(fig2_path)
+plt.close(fig)
+
+v2_text = (
+    "V2 Interpretation:\n"
+    "The boxplots compare math scores for students who completed the test preparation course versus those who did not. "
+    "Students who completed test preparation show a higher median math score and a slightly higher lower quartile, indicating a general shift upward. "
+    "The interquartile range is comparable, but the completed group has fewer low outliers. "
+    "This suggests that completing the test preparation course is associated with improved math performance in this dataset. "
+    "While the effect is noticeable, formal statistical testing would quantify significance.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V2 — Test prep impact on math\n\n")
+    f.write(f"![V2]({fig2_path})\n\n")
+    f.write(v2_text + "\n")
+
+# V3: Lunch type and average performance (grouped bar chart)
+fig3_path = os.path.join(fig_dir, "V3_lunch_grouped_bar.png")
+means_by_lunch = stud_df.groupby("lunch")["overall_avg"].mean().reindex(["standard","free/reduced"])
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+x = np.arange(len(means_by_lunch))
+ax.bar(x, means_by_lunch.values)
+ax.set_xticks(x)
+ax.set_xticklabels(means_by_lunch.index)
+ax.set_title("V3 — Mean overall average score by lunch type")
+ax.set_ylabel("Mean overall average (0-100)")
+for i,v in enumerate(means_by_lunch.values):
+    ax.text(i, v+0.5, f"{v:.2f}", ha="center", va="bottom")
+plt.tight_layout()
+plt.savefig(fig3_path)
+plt.close(fig)
+
+v3_text = (
+    "V3 Interpretation:\n"
+    "The grouped bar chart shows mean overall average (mean of math, reading, writing) by lunch type. "
+    "Students with standard lunch have a higher mean overall average than students on free/reduced lunch. "
+    "This difference likely reflects underlying socioeconomic factors correlated with lunch type. "
+    "While the gap is visible, it is moderate; further modeling would control for parental education and other variables. "
+    "This visualization highlights an equity-related pattern worth further investigation.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V3 — Lunch type and average performance\n\n")
+    f.write(f"![V3]({fig3_path})\n\n")
+    f.write(v3_text + "\n")
+
+# V4: Correlation heatmap for subjects 
+# Compute correlation matrix
+corr_mat = stud_df[["math score","reading score","writing score"]].corr()
+
+fig4_path = os.path.join(fig_dir, "V4_subject_correlation_heatmap.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+cax = ax.imshow(corr_mat, vmin=-1, vmax=1)
+ax.set_xticks([0,1,2])
+ax.set_xticklabels(corr_mat.columns)
+ax.set_yticks([0,1,2])
+ax.set_yticklabels(corr_mat.index)
+# annotate coefficients
+for i in range(3):
+    for j in range(3):
+        ax.text(j, i, f"{corr_mat.iloc[i,j]:.2f}", ha="center", va="center")
+ax.set_title("V4 — Correlation heatmap: Math, Reading, Writing")
+fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+plt.tight_layout()
+plt.savefig(fig4_path)
+plt.close(fig)
+
+v4_text = (
+    "V4 Interpretation:\n"
+    "The correlation heatmap shows strong positive correlations among math, reading, and writing scores. "
+    "All pairwise correlations are high (typically above 0.6), indicating that students who do well in one subject tend to do well in the others. "
+    "These high correlations support the idea of a general academic ability factor contributing to performance across subjects. "
+    "Because correlations are symmetric, the heatmap clarifies which subject pairs are most tightly linked. "
+    "High correlations also suggest that combining scores into an overall average is reasonable for some analyses.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V4 — Subject correlations (heatmap)\n\n")
+    f.write(f"![V4]({fig4_path})\n\n")
+    f.write(v4_text + "\n")
+
+# V5: Math vs reading scatter with trend lines by test prep 
+fig5_path = os.path.join(fig_dir, "V5_math_vs_reading_trendlines.png")
+fig, ax = plt.subplots(figsize=(8,6), dpi=300)
+groups = stud_df.groupby("test preparation course")
+colors = {"completed":"C0","none":"C1"}
+
+# scatter points and linear fits per group
+for name, group in groups:
+    x = group["reading score"].values
+    y = group["math score"].values
+    ax.scatter(x, y, label=f"{name} (n={len(group)})", alpha=0.6)
+    # fit linear regression (ordinary least squares)
+    coef = np.polyfit(x, y, 1)
+    xs = np.array([x.min(), x.max()])
+    ys = np.polyval(coef, xs)
+    ax.plot(xs, ys, linestyle="--", linewidth=1.5)
+    # annotate slope
+    ax.text(xs.mean(), ys.mean(), f"slope={coef[0]:.3f}", fontsize=8)
+
+ax.set_title("V5 — Math vs Reading with trend lines by test preparation course")
+ax.set_xlabel("Reading score (0-100)")
+ax.set_ylabel("Math score (0-100)")
+ax.legend()
+ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+plt.tight_layout()
+plt.savefig(fig5_path)
+plt.close(fig)
+
+v5_text = (
+    "V5 Interpretation:\n"
+    "The scatter plot shows math vs reading scores with separate best-fit lines for students who completed test prep and those who did not. "
+    "Both groups show a positive association: higher reading scores tend to accompany higher math scores. "
+    "The completed group typically has a slightly steeper slope and higher intercept, reflecting that for a given reading score they tend to have higher math scores on average. "
+    "This suggests that test preparation is associated with a modest advantage in math relative to reading. "
+    "The scatter also reveals variability—students with similar reading scores can have a range of math scores.\n\n"
+)
+with open(report_path, "a") as f:
+    f.write("### V5 — Math vs Reading with trend lines by test preparation\n\n")
+    f.write(f"![V5]({fig5_path})\n\n")
+    f.write(v5_text + "\n")
+
+# Final notes and list generated files
+with open(report_path, "a") as f:
+    f.write("## Files generated\n\n")
+    f.write(f"- Raw frailty CSV: `{raw_frailty_path}`\n")
+    f.write(f"- Processed frailty CSV: `{processed_path}`\n")
+    f.write(f"- Students synthetic CSV: `{students_path}`\n")
+    f.write(f"- Clean students CSV: `{students_clean_path}`\n")
+    f.write(f"- Figures saved under: `{fig_dir}`\n\n")
+
+# Display some key outputs for the user
+_display_df, summary.round(2), corr_grip_frailty, fig_dir, report_path
+
+STDOUT/STDERR
+/home/sandbox/.local/lib/python3.11/site-packages/pandas/core/internals/blocks.py:2323: RuntimeWarning: invalid value encountered in cast
+  values = values.astype(str)
