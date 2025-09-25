@@ -143,9 +143,9 @@ def visualize_student_data(df):
         f.write("![V5](V5_math_reading_trend.png)\n\n")
         f.write("The scatter plot with trend lines reveals a positive association between reading and math scores. "
                 "Students who completed the test prep course show a steeper slope, indicating stronger gains in math relative to reading. "
-                "This suggests that test prep may enhance math-specific skills more than reading. "
+                "This means that test prep may enhance math-specific skills more than reading. "
                 "The 'none' group has a flatter trend, implying weaker math performance even with high reading scores.\n\n")
 
-# Run the workflow
+# Running the workflow and data visualizations
 df_students = ingest_student_data()
 visualize_student_data(df_students)
