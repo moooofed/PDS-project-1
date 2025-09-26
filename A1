@@ -171,6 +171,6 @@ def visualize_student_data(df):
                 "Educators might explore differentiated strategies to boost both areas. "
                 "Overall, test prep appears to amplify math achievement more effectively than reading.\n\n")
 
-# Run student workflow
+# Running student workflow
 df_students = ingest_student_data()
 visualize_student_data(df_students)
