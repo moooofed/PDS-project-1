@@ -1,4 +1,4 @@
-# frailty_analysis.py
+# Part 1: Frailty_analysis.py
 
 import pandas as pd
 import numpy as np
@@ -12,10 +12,10 @@ def ingest_frailty_data():
         "Grip_kg": [30, 31, 29, 28, 24, 26, 22, 20, 19, 31],
         "Frailty": ["N", "N", "N", "Y", "Y", "N", "Y", "Y", "N", "N"]
     }
-    os.makedirs("data", exist_ok=True)
+    os.makedirs("data/raw", exist_ok=True)
     df = pd.DataFrame(data)
-    df.to_csv("data/frailty_raw.csv", index=False)
-    return pd.read_csv("data/frailty_raw.csv")
+    df.to_csv("data/raw/frailty_raw.csv", index=False)
+    return pd.read_csv("data/raw/frailty_raw.csv")
 
 def process_frailty_data(df):
     df["Height_m"] = df["Height_in"] * 0.0254
@@ -31,26 +31,28 @@ def process_frailty_data(df):
     df["AgeGroup"] = df["Age_yr"].apply(age_group)
     df["Frailty_binary"] = df["Frailty"].map({"Y": 1, "N": 0}).astype("int8")
     df = pd.get_dummies(df, columns=["AgeGroup"], prefix="AgeGroup")
-    df.to_csv("data/frailty_processed.csv", index=False)
+    os.makedirs("data/clean", exist_ok=True)
+    df.to_csv("data/clean/frailty_processed.csv", index=False)
     return df
 
 def analyze_frailty(df):
     summary = df.describe().loc[["mean", "50%", "std"]]
     summary.rename(index={"50%": "median"}, inplace=True)
     correlation = df["Grip_kg"].corr(df["Frailty_binary"])
-    os.makedirs("reports", exist_ok=True)
-    with open("reports/findings.md", "w") as f:
+    os.makedirs("results", exist_ok=True)
+    with open("results/findings.md", "w") as f:
         f.write("# Frailty Study Findings\n\n")
         f.write("## Summary Statistics\n")
         f.write(summary.to_markdown())
         f.write("\n\n## Correlation Analysis\n")
         f.write(f"Correlation between Grip Strength and Frailty: **{correlation:.2f}**\n")
 
-# Running frailty workflow
+# Run frailty workflow
 df_frailty = ingest_frailty_data()
 df_frailty_processed = process_frailty_data(df_frailty)
 analyze_frailty(df_frailty_processed)
 
+# Part 2: Student Analysis
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -62,13 +64,13 @@ def ingest_student_data():
     return df
 
 def visualize_student_data(df):
-    os.makedirs("reports", exist_ok=True)
-    report_path = "reports/student_analysis.md"
+    os.makedirs("results", exist_ok=True)
+    report_path = "results/student_analysis.md"
 
     with open(report_path, "w") as f:
         f.write("# Student Performance Visualizations\n\n")
 
-        # Visualization 1: Gender boxplots
+        # V1: Gender boxplots
         plt.figure(figsize=(8, 6), dpi=300)
         sns.boxplot(data=df.melt(id_vars='gender', value_vars=['math score', 'reading score']),
                     x='variable', y='value', hue='gender')
@@ -77,31 +79,40 @@ def visualize_student_data(df):
         plt.ylabel("Score")
         plt.legend(title="Gender")
         plt.tight_layout()
-        plt.savefig("reports/V1_gender_boxplot.png")
+        plt.savefig("results/V1_gender_boxplot.png")
         f.write("## V1: Gender Differences in Math vs Reading\n")
         f.write("![V1](V1_gender_boxplot.png)\n\n")
-        f.write("Female students tend to outperform males in reading, with higher medians and tighter score distributions. "
-                "Math scores are more evenly distributed across genders, though males show slightly higher upper quartiles. "
-                "These patterns suggest that gender differences are more pronounced in reading than in math. "
-                "Educational strategies might consider gender-specific support in reading and math. "
-                "Overall, reading appears to favor females, while math is more balanced.\n\n")
+        f.write("**Interpretation:** Female students tend to outperform male students in reading, as shown by higher median scores and tighter distributions. "
+                "The reading score boxplots for females are more compact, indicating consistency and fewer outliers. "
+                "In contrast, math scores are more evenly distributed across genders, with males showing slightly higher upper quartiles. "
+                "This suggests that while math performance is comparable, reading proficiency is more gender-skewed. "
+                "These patterns may reflect differences in early literacy development or educational support. "
+                "Educators might consider tailoring reading interventions to better support male students. "
+                "Meanwhile, math instruction appears to benefit from a balanced approach across genders. "
+                "Overall, gender differences are more pronounced in reading than in math.\n\n")
 
-        # Visualization 2: Test prep impact
+        # V2: Test prep impact
         plt.figure(figsize=(8, 6), dpi=300)
         sns.boxplot(data=df, x='test preparation course', y='math score')
         plt.title("Math Scores by Test Preparation Course Completion")
         plt.xlabel("Test Preparation Course")
         plt.ylabel("Math Score")
         plt.tight_layout()
-        plt.savefig("reports/V2_testprep_math.png")
+        plt.savefig("results/V2_testprep_math.png")
         f.write("## V2: Test Preparation Impact on Math Scores\n")
         f.write("![V2](V2_testprep_math.png)\n\n")
-        f.write("Students who completed the test preparation course consistently scored higher in math. "
-                "The median math score for the 'completed' group is noticeably above that of the 'none' group. "
-                "This supports the hypothesis that test preparation positively impacts math achievement. "
-                "The difference in score distributions highlights the value of structured academic support.\n\n")
+        f.write("**Interpretation:** Students who completed the test preparation course consistently scored higher in math. "
+                "The median math score for the 'completed' group is noticeably higher than that of the 'none' group. "
+                "This suggests that structured academic support has a measurable impact on performance. "
+                "The score distribution for the 'completed' group is also tighter, indicating more consistent outcomes. "
+                "In contrast, the 'none' group shows wider variability and lower overall scores. "
+                "These findings support the value of targeted preparation programs in boosting achievement. "
+                "Schools may benefit from expanding access to test prep resources, especially for underserved populations. "
+                "The results highlight how preparation can level the playing field in standardized assessments.\n\n")
 
-        # Visualization 3: Lunch type and average performance
+
+
+        # V3: Lunch type and average performance
         df["overall_avg"] = df[["math score", "reading score", "writing score"]].mean(axis=1)
         avg_scores = df.groupby("lunch")["overall_avg"].mean().reset_index()
         plt.figure(figsize=(8, 6), dpi=300)
@@ -110,42 +121,56 @@ def visualize_student_data(df):
         plt.xlabel("Lunch Type")
         plt.ylabel("Average Score")
         plt.tight_layout()
-        plt.savefig("reports/V3_lunch_avg.png")
+        plt.savefig("results/V3_lunch_avg.png")
         f.write("## V3: Lunch Type and Average Performance\n")
         f.write("![V3](V3_lunch_avg.png)\n\n")
-        f.write("Students receiving standard lunch outperform those on free/reduced lunch across all subjects. "
-                "The average score difference is substantial, indicating a potential link between socioeconomic status and academic performance. "
-                "This disparity may reflect broader resource gaps, such as access to tutoring or stable study environments.\n\n")
+        f.write("**Interpretation:** Students receiving standard lunch outperform those on free or reduced lunch across all subjects. "
+                "The average score difference is substantial, suggesting a link between nutrition access and academic outcomes. "
+                "This disparity may reflect broader socioeconomic factors, such as household income, parental education, or access to learning resources. "
+                "Students on free/reduced lunch may face additional challenges outside the classroom that impact performance. "
+                "The data underscores the importance of holistic support systems, including food security and after-school programs. "
+                "Addressing these gaps could help close achievement divides. "
+                "Schools might consider integrating academic and social services to better support low-income students. "
+                "Overall, lunch type serves as a proxy for deeper structural inequalities.\n\n")
 
-        # Visualization 4: Subject correlations
+        # V4: Subject correlations
+
+        # V4: Subject correlations
         plt.figure(figsize=(8, 6), dpi=300)
         corr = df[["math score", "reading score", "writing score"]].corr()
         sns.heatmap(corr, annot=True, cmap="coolwarm", fmt=".2f")
         plt.title("Correlation Between Subjects")
         plt.tight_layout()
-        plt.savefig("reports/V4_subject_correlation.png")
+        plt.savefig("results/V4_subject_correlation.png")
         f.write("## V4: Subject Correlations\n")
         f.write("![V4](V4_subject_correlation.png)\n\n")
-        f.write("The heatmap shows strong positive correlations among all three subjects. "
-                "Reading and writing have the highest correlation (~0.95), indicating a close relationship in language skills. "
-                "Math also correlates positively with reading and writing (~0.65–0.70), though less strongly. "
-                "These results suggest that students who excel in one subject often perform well in others.\n\n")
+        f.write("**Interpretation:** The heatmap reveals strong positive correlations among math, reading, and writing scores. "
+                "Reading and writing are especially tightly linked, with a correlation near 0.95, suggesting that proficiency in one language skill strongly predicts the other. "
+                "Math also correlates positively with both reading and writing, though less intensely (~0.65–0.70). "
+                "These relationships imply that students who excel in one subject often perform well in others. "
+                "The data supports the idea of cross-disciplinary skill development, where improvements in literacy may benefit math reasoning. "
+                "It also suggests that academic interventions should consider overlapping competencies. "
+                "Overall, the subjects are interconnected, not isolated.\n\n")
 
-        # Visualization 5: Math vs Reading with trend lines
+        # V5: Math vs Reading with trend lines
         sns.lmplot(data=df, x="reading score", y="math score", hue="test preparation course",
                    height=6, aspect=1.33, markers=["o", "s"], palette="Set1")
         plt.title("Math vs Reading Scores by Test Prep Completion")
         plt.xlabel("Reading Score")
         plt.ylabel("Math Score")
         plt.tight_layout()
-        plt.savefig("reports/V5_math_reading_trend.png")
+        plt.savefig("results/V5_math_reading_trend.png")
         f.write("## V5: Math vs Reading with Trend Lines by Test Prep\n")
         f.write("![V5](V5_math_reading_trend.png)\n\n")
-        f.write("The scatter plot with trend lines reveals a positive association between reading and math scores. "
-                "Students who completed the test prep course show a steeper slope, indicating stronger gains in math relative to reading. "
-                "This means that test prep may enhance math-specific skills more than reading. "
-                "The 'none' group has a flatter trend, implying weaker math performance even with high reading scores.\n\n")
+        f.write("**Interpretation:** The scatter plot shows a clear positive relationship between reading and math scores. "
+                "Students who completed the test prep course exhibit a steeper trend line, indicating stronger math gains relative to reading. "
+                "This suggests that test prep may enhance math-specific skills more than reading comprehension. "
+                "The 'none' group has a flatter slope, implying weaker math performance even among students with high reading scores. "
+                "This divergence highlights the targeted impact of preparation programs. "
+                "It also raises questions about whether reading and math require different types of support. "
+                "Educators might explore differentiated strategies to boost both areas. "
+                "Overall, test prep appears to amplify math achievement more effectively than reading.\n\n")
 
-# Running the workflow and data visualizations
+# Run student workflow
 df_students = ingest_student_data()
 visualize_student_data(df_students)
